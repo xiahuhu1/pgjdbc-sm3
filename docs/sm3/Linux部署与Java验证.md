@@ -4,14 +4,14 @@
 
 ## 1. 交付物
 
-- Linux x86_64 镜像：`172.16.61.68:8080/library/postgres-sm3:17.10-sm3.1`。最终交付记录提供镜像 digest 和测试结果。
+- Linux x86_64 镜像：`172.16.61.68:8080/library/postgres-sm3:17.10-sm3.2`。最终交付记录提供镜像 digest 和测试结果。
 - Linux 启动脚本：`deploy/sm3/run-linux.sh`，使用同目录 `.env` 配置密码及参数，默认独立数据卷和 `55433` 测试端口。
 - JDBC 压缩包：内含定制驱动主 JAR、源码 JAR、Maven POM、校验和、验证程序和本文。
 - JDBC 源码基线为 `REL42.7.3`；业务依赖只替换为本次定制版本，Driver 类、URL 协议和 JDBC API 保持一致。
 
 以下命令中的 `<Linux测试机IP>`、`<Nexus地址>`、密码均由你在内网实际环境填写。示例不包含实际凭据。
 
-本次仅简化测试部署脚本，已发布镜像 digest 和 JDBC 产物保持不变。JDBC 主压缩包、源码压缩包及 patch 保持首次交付内容；其中旧的 Docker 启动章节由当前交付根目录的本文替代，Java/Nexus 验证步骤仍适用。
+本轮镜像 `17.10-sm3.2` 的入口直接支持 `POSTGRES_PASSWORD`，启动脚本采用停止、删除同名容器后重新创建的方式；数据库二进制沿用 `17.10-sm3.1`。JDBC 版本仍为 `42.7.3-sm3.1`，主压缩包、源码压缩包及 patch 保持首次交付内容；其中旧的 Docker 启动章节由当前交付根目录的本文替代，Java/Nexus 验证步骤仍适用。
 
 ## 2. Linux Docker 仓库配置
 
@@ -27,9 +27,9 @@
 
 ```sh
 docker login 172.16.61.68:8080
-docker pull 172.16.61.68:8080/library/postgres-sm3:17.10-sm3.1
+docker pull 172.16.61.68:8080/library/postgres-sm3:17.10-sm3.2
 docker image inspect --format '{{.Os}}/{{.Architecture}}' \
-  172.16.61.68:8080/library/postgres-sm3:17.10-sm3.1
+  172.16.61.68:8080/library/postgres-sm3:17.10-sm3.2
 # 应为 linux/amd64
 ```
 
@@ -55,12 +55,12 @@ POSTGRES_PASSWORD='ChangeMeForTest_123'
 HOST_PORT=55433
 CONTAINER=postgres-sm3-test
 VOLUME=postgres-sm3-test-data
-IMAGE=172.16.61.68:8080/library/postgres-sm3:17.10-sm3.1
+IMAGE=172.16.61.68:8080/library/postgres-sm3:17.10-sm3.2
 ```
 
-`.env` 按 Bash 赋值语法读取，等号两侧不要加空格，密码建议用单引号包裹。将示例密码改成自己的测试密码。脚本使用现有镜像启动，仅创建/复用数据卷，不再创建 secret 卷；容器启动时将密码写入临时文件，以兼容现有镜像入口。
+`.env` 按 Bash 赋值语法读取，等号两侧不要加空格，密码建议用单引号包裹。将示例密码改成自己的测试密码。脚本通过 `docker run -e POSTGRES_PASSWORD` 将密码交给镜像入口，挂载同一个数据卷。
 
-若同名容器已存在，使用 `docker start postgres-sm3-test` 恢复，不要重复执行启动脚本创建同名容器；自定义容器名时替换命令中的名称。
+每次执行 `./run-linux.sh` 都会先停止、删除同名容器，再按 `.env` 重新创建；同名数据卷保留并继续使用。若原来部署的是 `17.10-sm3.1`，先拉取上面的 `17.10-sm3.2`，将现有 `.env` 的 `IMAGE` 改为新版本，再执行脚本。保留原来的 `CONTAINER`、`VOLUME` 和 `HOST_PORT` 即可接续原测试库。
 
 镜像仅在空数据目录初始化。修改 `.env` 中的密码不会重置已有集群口令；已有账号需通过 SQL/`\password` 改密。测试数据在 Docker named volume，停止/删除容器不自动删除数据；**不要执行 `docker volume rm` 或带 `-v` 的清理来重启测试。** 不要把生产数据卷挂入本测试镜像。
 
@@ -244,7 +244,7 @@ docker stop postgres-sm3-test
 docker start postgres-sm3-test
 ```
 
-重启会复用数据，不会重新初始化或重设密码。更换镜像前先对测试库及角色信息备份，记录卷名和镜像 digest；不要让未改造的 PostgreSQL 镜像接管含 SM3 口令的账号并期待正常认证。
+上述命令恢复现有容器；执行 `./run-linux.sh` 则会停止、删除并重新创建同名容器，两者都复用数据，不会重新初始化或重设密码。更换镜像前先对测试库及角色信息备份，记录卷名和镜像 digest；不要让未改造的 PostgreSQL 镜像接管含 SM3 口令的账号并期待正常认证。
 
 回退到 SHA256 需要在支持的管理连接内设置 `password_encryption='scram-sha-256'`、重新设置账号密码并配置对应 HBA，然后切回官方驱动。SM3 verifier 不能直接转换回 SHA256 verifier。
 
