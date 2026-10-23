@@ -261,7 +261,7 @@ public interface PGConnection {
    * </p>
    *
    * <p>
-   * Acceptable values for encryptionType are null, "md5", or "scram-sha-256".
+   * Acceptable values for encryptionType are null, "md5", "scram-sha-256", or "scram-sm3".
    * Users should avoid "md5" unless they are explicitly targeting an older server that does not support the more secure SCRAM.
    * </p>
    *

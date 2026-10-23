@@ -85,6 +85,7 @@ dependencies {
         because("DataSourceFactory is needed for PGDataSourceFactoryTest")
     }
     shaded("com.ongres.scram:client:2.1")
+    shaded("org.bouncycastle:bcprov-jdk18on:1.86")
 
     implementation("org.checkerframework:checker-qual:3.42.0")
     testImplementation("se.jiderhamn:classloader-leak-test-framework:1.1.2")
@@ -200,6 +201,9 @@ val getShadedDependencyLicenses by tasks.registering(GatherLicenseTask::class) {
     overrideLicense("com.ongres.stringprep:stringprep") {
         licenseFiles = "stringprep"
     }
+    overrideLicense("org.bouncycastle:bcprov-jdk18on") {
+        licenseFiles = "bouncycastle"
+    }
 }
 
 val renderShadedLicense by tasks.registering(com.github.vlsi.gradle.release.Apache2LicenseRenderer::class) {
@@ -224,13 +228,19 @@ tasks.configureEach<Jar> {
 tasks.shadowJar {
     configurations = listOf(shaded)
     exclude("META-INF/maven/**")
+    exclude("META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA")
+    // SM3 uses private lightweight primitives, without exposing a JCE provider.
+    exclude("META-INF/services/java.security.Provider")
+    // Keep the Java 8 implementation; newer optional overlays need a newer ASM.
+    exclude("META-INF/versions/**")
     exclude("META-INF/LICENSE*")
     exclude("META-INF/NOTICE*")
     into("META-INF") {
         dependencyLicenses(shadedLicenseFiles)
     }
     listOf(
-            "com.ongres"
+            "com.ongres",
+            "org.bouncycastle"
     ).forEach {
         relocate(it, "${project.group}.shaded.$it")
     }

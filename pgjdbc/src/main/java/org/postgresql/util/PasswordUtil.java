@@ -6,6 +6,7 @@
 package org.postgresql.util;
 
 import org.postgresql.core.Utils;
+import org.postgresql.jre7.sasl.Sm3ScramMechanism;
 
 import com.ongres.scram.common.ScramFunctions;
 import com.ongres.scram.common.ScramMechanisms;
@@ -95,6 +96,29 @@ public class PasswordUtil {
     }
   }
 
+  /** Encode a PostgreSQL SCRAM-SM3 verifier, clearing the password after use. */
+  public static String encodeScramSm3(char[] password, int iterations, byte[] salt) {
+    Objects.requireNonNull(password, "password");
+    try {
+      Objects.requireNonNull(salt, "salt");
+      return Sm3ScramMechanism.encode(password, iterations, salt);
+    } finally {
+      Arrays.fill(password, (char) 0);
+    }
+  }
+
+  /** Encode a SCRAM-SM3 verifier using a random 16-byte salt and 4096 iterations. */
+  public static String encodeScramSm3(char[] password) {
+    Objects.requireNonNull(password, "password");
+    try {
+      byte[] salt = new byte[DEFAULT_SALT_LENGTH];
+      getSecureRandom().nextBytes(salt);
+      return encodeScramSm3(password, DEFAULT_ITERATIONS, salt);
+    } finally {
+      Arrays.fill(password, (char) 0);
+    }
+  }
+
   /**
    * Encode the given password for use with md5 authentication. The PostgreSQL
    * server uses the username as the per-user salt so that must also be provided.
@@ -174,6 +198,8 @@ public class PasswordUtil {
       case "off":
       case "md5":
         return encodeMd5(user, password);
+      case "scram-sm3":
+        return encodeScramSm3(password);
       case "scram-sha-256":
         return encodeScramSha256(password);
     }

@@ -702,9 +702,18 @@ public class ConnectionFactoryImpl extends ConnectionFactory {
             // Get the message length
             int msgLen = pgStream.receiveInteger4();
 
+            if (msgLen < 8) {
+              throw new PSQLException("Invalid authentication message length", PSQLState.CONNECTION_REJECTED);
+            }
+
             // Get the type of request
             int areq = pgStream.receiveInteger4();
 
+            if (scramAuthenticator != null && areq != AUTH_REQ_SASL_CONTINUE
+                && areq != AUTH_REQ_SASL_FINAL && areq != AUTH_REQ_OK) {
+              throw new PSQLException("Unexpected request during SCRAM authentication",
+                  PSQLState.CONNECTION_REJECTED);
+            }
             // Process the request.
             switch (areq) {
               case AUTH_REQ_MD5: {
@@ -852,7 +861,7 @@ public class ConnectionFactoryImpl extends ConnectionFactory {
                   }
                   return new ScramAuthenticator(user, String.valueOf(password), pgStream);
                 });
-                scramAuthenticator.processServerMechanismsAndInit();
+                scramAuthenticator.processServerMechanismsAndInit(msgLen - 8);
                 scramAuthenticator.sendScramClientFirstMessage();
                 // This works as follows:
                 // 1. When tests is run from IDE, it is assumed SCRAM library is on the classpath
@@ -865,14 +874,24 @@ public class ConnectionFactoryImpl extends ConnectionFactory {
                 break;
 
               case AUTH_REQ_SASL_CONTINUE:
+                if (scramAuthenticator == null) {
+                  throw new PSQLException("Unexpected SASLContinue", PSQLState.CONNECTION_REJECTED);
+                }
                 castNonNull(scramAuthenticator).processServerFirstMessage(msgLen - 4 - 4);
                 break;
 
               case AUTH_REQ_SASL_FINAL:
+                if (scramAuthenticator == null) {
+                  throw new PSQLException("Unexpected SASLFinal", PSQLState.CONNECTION_REJECTED);
+                }
                 castNonNull(scramAuthenticator).verifyServerSignature(msgLen - 4 - 4);
                 break;
 
               case AUTH_REQ_OK:
+                if (scramAuthenticator != null && !scramAuthenticator.isComplete()) {
+                  throw new PSQLException("SCRAM server signature was not verified",
+                      PSQLState.CONNECTION_REJECTED);
+                }
                 /* Cleanup after successful authentication */
                 LOGGER.log(Level.FINEST, " <=BE AuthenticationOk");
                 break authloop; // We're done.
@@ -892,6 +911,9 @@ public class ConnectionFactoryImpl extends ConnectionFactory {
         }
       }
     } finally {
+      if (scramAuthenticator != null) {
+        scramAuthenticator.close();
+      }
       /* Cleanup after successful or failed authentication attempts */
       if (sspiClient != null) {
         try {

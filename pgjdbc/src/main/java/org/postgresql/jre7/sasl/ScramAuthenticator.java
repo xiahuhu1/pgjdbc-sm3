@@ -34,6 +34,8 @@ public class ScramAuthenticator {
   private final String user;
   private final String password;
   private final PGStream pgStream;
+  private @Nullable Sm3ScramSession sm3Session;
+  private boolean serverVerified;
   private @Nullable ScramClient scramClient;
   private @Nullable ScramSession scramSession;
   private ScramSession.@Nullable ClientFinalProcessor clientFinalProcessor;
@@ -56,18 +58,34 @@ public class ScramAuthenticator {
     this.pgStream = pgStream;
   }
 
-  public void processServerMechanismsAndInit() throws IOException, PSQLException {
+  public void processServerMechanismsAndInit(int length) throws IOException, PSQLException {
+    if (length < 2 || length > 65536) {
+      throw new PSQLException("Invalid SASL mechanism list length", PSQLState.CONNECTION_REJECTED);
+    }
+    byte[] payload = pgStream.receive(length);
     List<String> mechanisms = new ArrayList<>();
-    do {
-      mechanisms.add(pgStream.receiveString());
-    } while (pgStream.peekChar() != 0);
-    int c = pgStream.receiveChar();
-    assert c == 0;
-    if (mechanisms.isEmpty()) {
-      throw new PSQLException(
-          GT.tr("No SCRAM mechanism(s) advertised by the server"),
-          PSQLState.CONNECTION_REJECTED
-      );
+    int start = 0;
+    for (int i = 0; i < payload.length; i++) {
+      if (payload[i] == 0) {
+        if (i == start) {
+          if (i != payload.length - 1) {
+            throw new PSQLException("Invalid SASL mechanism list", PSQLState.CONNECTION_REJECTED);
+          }
+          break;
+        }
+        mechanisms.add(new String(payload, start, i - start, StandardCharsets.US_ASCII));
+        start = i + 1;
+      } else if (payload[i] < 0x21 || payload[i] > 0x7e) {
+        throw new PSQLException("Invalid SASL mechanism name", PSQLState.CONNECTION_REJECTED);
+      }
+    }
+    if (start != payload.length - 1 || payload[payload.length - 1] != 0 || mechanisms.isEmpty()) {
+      throw new PSQLException("Invalid SASL mechanism list", PSQLState.CONNECTION_REJECTED);
+    }
+    if (mechanisms.contains(Sm3ScramMechanism.NAME)) {
+      sm3Session = new Sm3ScramSession();
+      LOGGER.log(Level.FINE, "Using SCRAM mechanism {0}", Sm3ScramMechanism.NAME);
+      return;
     }
 
     ScramClient scramClient;
@@ -92,7 +110,19 @@ public class ScramAuthenticator {
         scramClient.scramSession("*");   // Real username is ignored by server, uses startup one
   }
 
-  public void sendScramClientFirstMessage() throws IOException {
+  public void sendScramClientFirstMessage() throws IOException, PSQLException {
+    Sm3ScramSession sm3Session = this.sm3Session;
+    if (sm3Session != null) {
+      byte[] name = Sm3ScramMechanism.NAME.getBytes(StandardCharsets.US_ASCII);
+      byte[] message = sm3Session.clientFirst().getBytes(StandardCharsets.UTF_8);
+      sendAuthenticationMessage(name.length + 1 + 4 + message.length, stream -> {
+        stream.send(name);
+        stream.sendChar(0);
+        stream.sendInteger4(message.length);
+        stream.send(message);
+      });
+      return;
+    }
     ScramSession scramSession = this.scramSession;
     String clientFirstMessage = castNonNull(scramSession).clientFirstMessage();
     LOGGER.log(Level.FINEST, " FE=> SASLInitialResponse( {0} )", clientFirstMessage);
@@ -116,7 +146,15 @@ public class ScramAuthenticator {
   }
 
   public void processServerFirstMessage(int length) throws IOException, PSQLException {
+    checkMessageLength(length);
     String serverFirstMessage = pgStream.receiveString(length);
+    Sm3ScramSession sm3Session = this.sm3Session;
+    if (sm3Session != null) {
+      byte[] message = sm3Session.serverFirst(serverFirstMessage, password)
+          .getBytes(StandardCharsets.UTF_8);
+      sendAuthenticationMessage(message.length, stream -> stream.send(message));
+      return;
+    }
     LOGGER.log(Level.FINEST, " <=BE AuthenticationSASLContinue( {0} )", serverFirstMessage);
 
     ScramSession scramSession = this.scramSession;
@@ -162,7 +200,14 @@ public class ScramAuthenticator {
   }
 
   public void verifyServerSignature(int length) throws IOException, PSQLException {
+    checkMessageLength(length);
     String serverFinalMessage = pgStream.receiveString(length);
+    Sm3ScramSession sm3Session = this.sm3Session;
+    if (sm3Session != null) {
+      sm3Session.serverFinal(serverFinalMessage);
+      serverVerified = sm3Session.verified();
+      return;
+    }
     LOGGER.log(Level.FINEST, " <=BE AuthenticationSASLFinal( {0} )", serverFinalMessage);
 
     ScramSession.ClientFinalProcessor clientFinalProcessor = this.clientFinalProcessor;
@@ -174,6 +219,7 @@ public class ScramAuthenticator {
     }
     try {
       clientFinalProcessor.receiveServerFinalMessage(serverFinalMessage);
+      serverVerified = true;
     } catch (ScramParseException e) {
       throw new PSQLException(
           GT.tr("Invalid server-final-message: {0}", serverFinalMessage),
@@ -195,4 +241,22 @@ public class ScramAuthenticator {
       );
     }
   }
+
+  public boolean isComplete() {
+    return serverVerified;
+  }
+
+  public void close() {
+    Sm3ScramSession sm3Session = this.sm3Session;
+    if (sm3Session != null) {
+      sm3Session.close();
+    }
+  }
+
+  private static void checkMessageLength(int length) throws PSQLException {
+    if (length < 1 || length > 65536) {
+      throw new PSQLException("Invalid SCRAM message length", PSQLState.CONNECTION_REJECTED);
+    }
+  }
+
 }

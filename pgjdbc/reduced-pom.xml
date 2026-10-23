@@ -47,6 +47,11 @@
             <version>%{com.ongres.scram:client}</version>
         </dependency>
         <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>%{org.bouncycastle:bcprov-jdk18on}</version>
+        </dependency>
+        <dependency>
             <groupId>se.jiderhamn</groupId>
             <artifactId>classloader-leak-test-framework</artifactId>
             <version>%{se.jiderhamn:classloader-leak-test-framework}</version>
@@ -214,7 +219,8 @@
                         <artifactId>maven-shade-plugin</artifactId>
                         <version>3.1.0</version>
                         <configuration>
-                            <minimizeJar>true</minimizeJar>
+                            <!-- Match Gradle's complete Java 8 dependency bundle. -->
+                            <minimizeJar>false</minimizeJar>
                             <artifactSet>
                                 <excludes>
                                     <exclude>com.github.waffle:waffle-jna</exclude>
@@ -235,6 +241,11 @@
                                         <exclude>com/sun/jna/**</exclude>
                                         <exclude>LICENSE</exclude>
                                         <exclude>META-INF/maven/**</exclude>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/services/java.security.Provider</exclude>
+                                        <exclude>META-INF/versions/**</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
@@ -250,6 +261,10 @@
                                         <relocation>
                                             <pattern>com.ongres</pattern>
                                             <shadedPattern>org.postgresql.shaded.com.ongres</shadedPattern>
+                                        </relocation>
+                                        <relocation>
+                                            <pattern>org.bouncycastle</pattern>
+                                            <shadedPattern>org.postgresql.shaded.org.bouncycastle</shadedPattern>
                                         </relocation>
                                     </relocations>
                                 </configuration>
