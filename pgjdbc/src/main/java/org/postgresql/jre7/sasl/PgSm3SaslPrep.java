@@ -7,7 +7,7 @@ package org.postgresql.jre7.sasl;
 
 import java.text.Normalizer;
 
-/** PostgreSQL 17.10 password preparation, including its original-input fallback. */
+/** PostgreSQL 17 password preparation, including its original-input fallback. */
 final class PgSm3SaslPrep {
   private PgSm3SaslPrep() {
   }

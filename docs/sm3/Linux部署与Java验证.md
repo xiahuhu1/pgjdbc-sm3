@@ -1,17 +1,17 @@
-# PostgreSQL 17.10 / JDBC 42.7.3 SM3 测试部署与验收
+# PostgreSQL 17.12 / JDBC 42.7.3 SM3 测试部署与验收
 
 适用本项目配套改造的 PostgreSQL 与 JDBC。SM3 用于口令存储与 SCRAM 登录认证，SQL/查询结果传输加密仍由 TLS 负责。本次仅实现普通 `SCRAM-SM3`，没有 SM3-PLUS。
 
 ## 1. 交付物
 
-- Linux x86_64 镜像：`172.16.61.68:8080/library/postgres-sm3:17.10-sm3.2`。最终交付记录提供镜像 digest 和测试结果。
+- Linux x86_64 镜像：`172.16.61.68:8080/library/postgres-sm3:17.12-sm3.3`。最终交付记录提供镜像 digest 和测试结果。
 - Linux 启动脚本：`deploy/sm3/run-linux.sh`，使用同目录 `.env` 配置密码及参数，默认独立数据卷和 `55433` 测试端口。
 - JDBC 压缩包：内含定制驱动主 JAR、源码 JAR、Maven POM、校验和、验证程序和本文。
 - JDBC 源码基线为 `REL42.7.3`；业务依赖只替换为本次定制版本，Driver 类、URL 协议和 JDBC API 保持一致。
 
 以下命令中的 `<Linux测试机IP>`、`<Nexus地址>`、密码均由你在内网实际环境填写。示例不包含实际凭据。
 
-本轮镜像 `17.10-sm3.2` 的入口直接支持 `POSTGRES_PASSWORD`，启动脚本采用停止、删除同名容器后重新创建的方式；数据库二进制沿用 `17.10-sm3.1`。JDBC 版本仍为 `42.7.3-sm3.1`，主压缩包、源码压缩包及 patch 保持首次交付内容；其中旧的 Docker 启动章节由当前交付根目录的本文替代，Java/Nexus 验证步骤仍适用。
+本轮镜像 `17.12-sm3.3` 的入口直接支持 `POSTGRES_PASSWORD`，启动脚本采用停止、删除同名容器后重新创建的方式；数据库二进制基于 PostgreSQL 17.12。JDBC 版本仍为 `42.7.3-sm3.1`，主压缩包、源码压缩包及 patch 保持首次交付内容；其中旧的 Docker 启动章节由当前交付根目录的本文替代，Java/Nexus 验证步骤仍适用。
 
 ## 2. Linux Docker 仓库配置
 
@@ -27,9 +27,9 @@
 
 ```sh
 docker login 172.16.61.68:8080
-docker pull 172.16.61.68:8080/library/postgres-sm3:17.10-sm3.2
+docker pull 172.16.61.68:8080/library/postgres-sm3:17.12-sm3.3
 docker image inspect --format '{{.Os}}/{{.Architecture}}' \
-  172.16.61.68:8080/library/postgres-sm3:17.10-sm3.2
+  172.16.61.68:8080/library/postgres-sm3:17.12-sm3.3
 # 应为 linux/amd64
 ```
 
@@ -55,12 +55,12 @@ POSTGRES_PASSWORD='ChangeMeForTest_123'
 HOST_PORT=55433
 CONTAINER=postgres-sm3-test
 VOLUME=postgres-sm3-test-data
-IMAGE=172.16.61.68:8080/library/postgres-sm3:17.10-sm3.2
+IMAGE=172.16.61.68:8080/library/postgres-sm3:17.12-sm3.3
 ```
 
 `.env` 按 Bash 赋值语法读取，等号两侧不要加空格，密码建议用单引号包裹。将示例密码改成自己的测试密码。脚本通过 `docker run -e POSTGRES_PASSWORD` 将密码交给镜像入口，挂载同一个数据卷。
 
-每次执行 `./run-linux.sh` 都会先停止、删除同名容器，再按 `.env` 重新创建；同名数据卷保留并继续使用。若原来部署的是 `17.10-sm3.1`，先拉取上面的 `17.10-sm3.2`，将现有 `.env` 的 `IMAGE` 改为新版本，再执行脚本。保留原来的 `CONTAINER`、`VOLUME` 和 `HOST_PORT` 即可接续原测试库。
+每次执行 `./run-linux.sh` 都会先停止、删除同名容器，再按 `.env` 重新创建；同名数据卷保留并继续使用。若原来部署的是 `17.10-sm3.3`，先拉取上面的 `17.12-sm3.3`，将现有 `.env` 的 `IMAGE` 改为新版本，再执行脚本。保留原来的 `CONTAINER`、`VOLUME` 和 `HOST_PORT` 即可接续原测试库。
 
 镜像仅在空数据目录初始化。修改 `.env` 中的密码不会重置已有集群口令；已有账号需通过 SQL/`\password` 改密。测试数据在 Docker named volume，停止/删除容器不自动删除数据；**不要执行 `docker volume rm` 或带 `-v` 的清理来重启测试。** 不要把生产数据卷挂入本测试镜像。
 
